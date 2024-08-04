@@ -127,7 +127,7 @@ Switches to the specified branch.
 groot merge <branch-name>
 ```
 
-Merges the specified branch into the current branch.
+Merges the specified branch into the current branch..
 
 ### View Commit History
 
