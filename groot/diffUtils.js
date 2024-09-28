@@ -1,3 +1,4 @@
+//diffUtils.js
 const { colorize, RED, GREEN } = require('./utils');
 
 function computeDiff(lines1, lines2) {

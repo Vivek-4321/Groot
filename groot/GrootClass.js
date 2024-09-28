@@ -1,3 +1,4 @@
+//GrootClass.js
 const fs = require("fs");
 const path = require("path");
 const {
@@ -7,8 +8,20 @@ const {
   writeTree,
 } = require("./objectUtils");
 const { loadIndex, saveIndex } = require("./indexUtils");
-const { isIgnored, colorize, RED, GREEN, YELLOW, BLUE, RESET } = require("./utils");
-const { getCurrentBranch, getBranchCommit, updateBranch } = require("./branchUtils");
+const {
+  isIgnored,
+  colorize,
+  RED,
+  GREEN,
+  YELLOW,
+  BLUE,
+  RESET,
+} = require("./utils");
+const {
+  getCurrentBranch,
+  getBranchCommit,
+  updateBranch,
+} = require("./branchUtils");
 const configManager = require("./configManager");
 const { showLineDiff } = require("./diffUtils");
 
@@ -70,7 +83,10 @@ class Groot {
     files.forEach((file) => {
       const fullPath = path.join(dirPath, file);
       if (fs.statSync(fullPath).isDirectory()) {
-        if (file !== ".groot" && !isIgnored(fullPath, this.ignorePatterns, this.rootDir)) {
+        if (
+          file !== ".groot" &&
+          !isIgnored(fullPath, this.ignorePatterns, this.rootDir)
+        ) {
           this.addDirectory(fullPath);
         }
       } else {
@@ -224,7 +240,10 @@ class Groot {
       );
 
       if (fileEntry) {
-        const fileContent = readObject(fileEntry.hash, this.grootDir).content.toString();
+        const fileContent = readObject(
+          fileEntry.hash,
+          this.grootDir
+        ).content.toString();
         const lines = fileContent.split("\n");
 
         lines.forEach((line, index) => {
@@ -316,6 +335,91 @@ class Groot {
     console.log(`Checked out commit ${commitHash}`);
   }
 
+  mergeTrees(currentCommit, branchCommit, baseCommit) {
+    const baseTree = readObject(
+      readObject(baseCommit, this.grootDir).tree,
+      this.grootDir
+    );
+    const currentTree = readObject(
+      readObject(currentCommit, this.grootDir).tree,
+      this.grootDir
+    );
+    const branchTree = readObject(
+      readObject(branchCommit, this.grootDir).tree,
+      this.grootDir
+    );
+
+    const mergedEntries = new Map();
+    const conflicts = new Map();
+
+    // Helper function to get file content
+    const getFileContent = (tree, fileName) => {
+      const entry = tree.entries.find((e) => e.name === fileName);
+      return entry
+        ? readObject(entry.hash, this.grootDir).content.toString()
+        : null;
+    };
+
+    // Merge the trees
+    const allFiles = new Set([
+      ...baseTree.entries.map((e) => e.name),
+      ...currentTree.entries.map((e) => e.name),
+      ...branchTree.entries.map((e) => e.name),
+    ]);
+
+    for (const fileName of allFiles) {
+      const baseContent = getFileContent(baseTree, fileName);
+      const currentContent = getFileContent(currentTree, fileName);
+      const branchContent = getFileContent(branchTree, fileName);
+
+      if (currentContent === branchContent) {
+        // No conflict, use either version
+        if (currentContent !== null) {
+          mergedEntries.set(
+            fileName,
+            currentTree.entries.find((e) => e.name === fileName)
+          );
+        }
+      } else if (currentContent === baseContent) {
+        // Current branch didn't modify, use branch version
+        mergedEntries.set(
+          fileName,
+          branchTree.entries.find((e) => e.name === fileName)
+        );
+      } else if (branchContent === baseContent) {
+        // Branch didn't modify, use current version
+        mergedEntries.set(
+          fileName,
+          currentTree.entries.find((e) => e.name === fileName)
+        );
+      } else {
+        // Conflict detected
+        conflicts.set(fileName, {
+          base: baseContent,
+          current: currentContent,
+          branch: branchContent,
+        });
+      }
+    }
+
+    if (conflicts.size > 0) {
+      return { conflicts };
+    }
+
+    // Create the merged tree content
+    let treeContent = "";
+    for (const entry of mergedEntries.values()) {
+      treeContent += `${entry.mode} ${entry.type} ${entry.hash}\t${entry.name}\n`;
+    }
+
+    const mergedTreeHash = hashObject(
+      Buffer.from(treeContent),
+      "tree",
+      this.grootDir
+    );
+    return { tree: mergedTreeHash };
+  }
+
   merge(branchName) {
     const currentBranch = this.getCurrentBranch();
     const currentCommit = this.getHead();
@@ -353,6 +457,13 @@ class Groot {
     this.updateBranch(currentBranch, mergeCommit);
 
     console.log(`Merged branch '${branchName}' into ${currentBranch}`);
+  }
+
+  createMergeCommit(currentCommit, branchCommit, mergeTree) {
+    const message = `Merge branch '${this.getCurrentBranch()}' into ${this.getBranchNameFromCommit(
+      branchCommit
+    )}`;
+    return createCommit(mergeTree, currentCommit, message, this.grootDir);
   }
 
   rebase(branchName) {
@@ -637,7 +748,11 @@ class Groot {
       newTreeContent += `${entry.mode} ${entry.type} ${entry.hash}\t${entry.name}\n`;
     }
 
-    const newTreeHash = hashObject(Buffer.from(newTreeContent), "tree", this.grootDir);
+    const newTreeHash = hashObject(
+      Buffer.from(newTreeContent),
+      "tree",
+      this.grootDir
+    );
     console.log(`Created new tree with hash: ${newTreeHash}`);
     return newTreeHash;
   }
@@ -667,8 +782,16 @@ class Groot {
   }
 
   createMergeCommit(currentCommit, branchCommit, mergeTree) {
-    const message = `Merge branch '${this.getCurrentBranch()}' into ${this.getBranchNameFromCommit(branchCommit)}`;
-    return createCommit(mergeTree, currentCommit, message, this.grootDir, branchCommit);
+    const message = `Merge branch '${this.getCurrentBranch()}' into ${this.getBranchNameFromCommit(
+      branchCommit
+    )}`;
+    return createCommit(
+      mergeTree,
+      currentCommit,
+      message,
+      this.grootDir,
+      branchCommit
+    );
   }
 
   getBranchNameFromCommit(commitHash) {
@@ -684,6 +807,167 @@ class Groot {
     }
 
     return "unknown";
+  }
+
+  // bisectStart(badCommit, goodCommit) {
+  //   const bisectPath = path.join(this.grootDir, 'BISECT_LOG');
+  //   const bisectState = {
+  //     bad: badCommit,
+  //     good: goodCommit,
+  //     current: null,
+  //     commits: this.getCommitsBetween(goodCommit, badCommit),
+  //   };
+  //   fs.writeFileSync(bisectPath, JSON.stringify(bisectState));
+  //   console.log(`Bisect started. ${bisectState.commits.length} commits to test.`);
+  //   this.bisectNext();
+  // }
+
+  bisectStart(badCommit, goodCommit) {
+    console.log(`Starting bisect with bad commit: ${badCommit} and good commit: ${goodCommit}`);
+    const bisectPath = path.join(this.grootDir, 'BISECT_LOG');
+    const commits = this.getCommitsBetween(goodCommit, badCommit);
+    if (commits.length === 0) {
+      console.log("Error: No commits found between the specified good and bad commits.");
+      return;
+    }
+    const bisectState = {
+      bad: badCommit,
+      good: goodCommit,
+      current: null,
+      commits: commits,
+    };
+    console.log(`Commits between good and bad: ${JSON.stringify(bisectState.commits)}`);
+    fs.writeFileSync(bisectPath, JSON.stringify(bisectState));
+    console.log(`Bisect started. ${bisectState.commits.length} commits to test.`);
+    this.bisectNext();
+  }
+  
+  getCommitsBetween(oldCommit, newCommit) {
+    console.log(`Getting commits between ${oldCommit} and ${newCommit}`);
+    let commits = [];
+    let current = newCommit;
+    
+    while (current && current !== oldCommit) {
+      console.log(`Processing commit: ${current}`);
+      commits.push(current);
+      try {
+        const commitObj = this.readObject(current);
+        if (!commitObj) {
+          console.error(`Unable to read commit object: ${current}`);
+          break;
+        }
+        if (commitObj.type !== 'commit') {
+          console.error(`Object ${current} is not a commit, it's a ${commitObj.type}`);
+          break;
+        }
+        const parentMatch = commitObj.content.toString().match(/parent ([a-f0-9]{40})/);
+        if (!parentMatch) {
+          console.log(`Reached root commit: ${current}`);
+          break;
+        }
+        current = parentMatch[1];
+      } catch (error) {
+        console.error(`Error processing commit ${current}: ${error.message}`);
+        break;
+      }
+    }
+    
+    if (current === oldCommit) {
+      commits.push(oldCommit);
+    }
+    
+    console.log(`Found ${commits.length} commits`);
+    return commits.reverse();
+  }
+  
+  
+  bisectNext() {
+    const bisectPath = path.join(this.grootDir, 'BISECT_LOG');
+    if (!fs.existsSync(bisectPath)) {
+      console.log('No bisect in progress.');
+      return;
+    }
+    
+    const bisectState = JSON.parse(fs.readFileSync(bisectPath, 'utf8'));
+    if (bisectState.commits.length === 0) {
+      console.log('Bisect complete. The first bad commit is:');
+      console.log(bisectState.bad);
+      fs.unlinkSync(bisectPath);
+      return;
+    }
+    
+    const midIndex = Math.floor(bisectState.commits.length / 2);
+    bisectState.current = bisectState.commits[midIndex];
+    this.checkoutCommit(bisectState.current);
+    
+    console.log(`Bisecting: ${bisectState.commits.length} commits left to test after this`);
+    console.log(`Checked out commit ${bisectState.current}`);
+    
+    fs.writeFileSync(bisectPath, JSON.stringify(bisectState));
+  }
+  
+  bisectGood() {
+    this.bisectMarkCommit('good');
+  }
+  
+  bisectBad() {
+    this.bisectMarkCommit('bad');
+  }
+  
+  bisectMarkCommit(status) {
+    const bisectPath = path.join(this.grootDir, 'BISECT_LOG');
+    if (!fs.existsSync(bisectPath)) {
+      console.log('No bisect in progress.');
+      return;
+    }
+    
+    const bisectState = JSON.parse(fs.readFileSync(bisectPath, 'utf8'));
+    const currentIndex = bisectState.commits.indexOf(bisectState.current);
+    
+    if (status === 'good') {
+      bisectState.good = bisectState.current;
+      bisectState.commits = bisectState.commits.slice(currentIndex + 1);
+    } else {
+      bisectState.bad = bisectState.current;
+      bisectState.commits = bisectState.commits.slice(0, currentIndex);
+    }
+    
+    fs.writeFileSync(bisectPath, JSON.stringify(bisectState));
+    this.bisectNext();
+  }
+  
+  // getCommitsBetween(oldCommit, newCommit) {
+  //   let commits = [];
+  //   let current = newCommit;
+    
+  //   while (current && current !== oldCommit) {
+  //     commits.push(current);
+  //     const commitObj = readObject(current, this.grootDir);
+  //     current = commitObj.parent;
+  //   }
+    
+  //   return commits.reverse();
+  // }
+  
+  isCommitNewer(commit, referenceCommit) {
+    const commits = this.getCommitsBetween(referenceCommit, commit);
+    return commits.length > 0;
+  }
+  
+  isCommitOlder(commit, referenceCommit) {
+    const commits = this.getCommitsBetween(commit, referenceCommit);
+    return commits.length > 0;
+  }
+  
+  bisectReset() {
+    const bisectPath = path.join(this.grootDir, 'BISECT_LOG');
+    if (fs.existsSync(bisectPath)) {
+      fs.unlinkSync(bisectPath);
+      console.log('Bisect reset. Returning to original HEAD.');
+      this.checkout(this.getCurrentBranch());
+    } else {
+      console.log('No bisect in progress.');
+    }
   }
 }
 

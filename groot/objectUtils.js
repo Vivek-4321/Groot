@@ -90,11 +90,12 @@ function readObject(hash, grootDir) {
   return null;
 }
 
-async function createCommit(tree, parent, message, grootDir) {
+function createCommit(tree, parent, message, grootDir) {
   let { name, email } = configManager.getUser();
 
   if (!name || !email) {
-    ({ name, email } = await configManager.promptForUser());
+    console.error("User name and email are not set. Please configure them using 'groot config --global user.name \"Your Name\"' and 'groot config --global user.email \"your.email@example.com\"'");
+    process.exit(1);
   }
 
   const author = {

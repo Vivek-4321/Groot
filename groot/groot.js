@@ -1,4 +1,6 @@
+//groot.js
 const { Groot } = require("./GrootClass");
+const configManager = require("./configManager");
 
 function main() {
   const groot = new Groot();
@@ -97,6 +99,22 @@ function main() {
         console.log(
           "User information not set. Use 'groot config' to set your name and email."
         );
+      }
+      break;
+    case "bisect":
+      if (args[0] === "start" && args[1] && args[2]) {
+        groot.bisectStart(args[1], args[2]);
+      } else if (args[0] === "good") {
+        groot.bisectGood();
+      } else if (args[0] === "bad") {
+        groot.bisectBad();
+      } else if (args[0] === "reset") {
+        groot.bisectReset();
+      } else {
+        console.log("Usage: groot bisect start <bad-commit> <good-commit>");
+        console.log("       groot bisect good");
+        console.log("       groot bisect bad");
+        console.log("       groot bisect reset");
       }
       break;
     default:
